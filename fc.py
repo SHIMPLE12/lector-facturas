@@ -24,7 +24,7 @@ with st.sidebar:
         st.markdown("---")
         st.subheader("🔓 Versión Ilimitada")
         st.markdown("Desbloquea procesamiento ilimitado para tu negocio.")
-        st.link_button("💳 Suscribirse a Pro (15€/mes)", "https://buy.stripe.com/tu-enlace-de-pago")
+        st.link_button("💳 Suscribirse à Pro (15€/mes)", "https://buy.stripe.com/tu-enlace-de-pago")
     else:
         st.info("💡 No necesitas registrarte. Disfruta de tus facturas de prueba gratuitas.")
 
@@ -65,9 +65,8 @@ def analizar_factura_texto(texto: str):
         if cif_gen: 
             cif = cif_gen.group(0)
 
-    # --- 3. DETECCIÓN DE FECHA (Más flexible) ---
+    # --- 3. DETECCIÓN DE FECHA ---
     fecha = "No encontrada"
-    # Buscar patrones numéricos comunes (YYYY-MM-DD, DD/MM/YYYY, DD-MM-YYYY)
     patrones_fecha = [
         r'\b(20\d{2})[-/.](0[1-9]|1[012])[-/.](0[1-9]|[12][0-9]|3[01])\b',
         r'\b(0[1-9]|[12][0-9]|3[01])[-/.](0[1-9]|1[012])[-/.](20\d{2})\b',
@@ -80,28 +79,36 @@ def analizar_factura_texto(texto: str):
             fecha = match.group(0)
             break
 
-    # --- 4. DETECCIÓN DE TOTAL (Búsqueda avanzada de importes monetarios) ---
+    # --- 4. DETECCIÓN DE TOTAL (Estrategia Multicriterio Reforzada) ---
     total = "No encontrado"
     
-    # Buscar líneas que contengan palabras clave de total
+    # Intento A: Buscar líneas que contengan palabras clave amplias
     for linea in reversed(lineas):
         ll = linea.lower()
-        if any(p in ll for p in ['total', 'a pagar', 'importe total', 'total factura', 'importe a pagar', 'import total']):
+        if any(p in ll for p in ['total', 'a pagar', 'importe', 'suma', 'eur', '€']):
             if 'subtotal' not in ll and 'base' not in ll and 'iva' not in ll:
                 nums = re.findall(r'\d{1,3}(?:[.,]\d{3})*[.,]\d{2}', linea)
                 if nums:
                     total = nums[-1]
                     break
                     
-    # Si no lo encuentra por palabra clave estricta, busca los números más grandes o al final del documento
+    # Intento B: Si sigue sin encontrarse, buscar cualquier importe monetario válido en las últimas 10 líneas del documento (donde suele ir el total)
     if total == "No encontrado":
+        for linea in reversed(lineas[-15:]):
+            nums = re.findall(r'\d{1,3}(?:[.,]\d{3})*[.,]\d{2}', linea)
+            if nums:
+                total = nums[-1]
+                break
+
+    # Intento C: Último recurso, buscar todos los importes del documento y coger el último de abajo
+    if total == "No encontrado":
+        todos_los_precios = []
         for linea in lineas:
-            ll = linea.lower()
-            if ('total' in ll or 'pagar' in ll) and 'subtotal' not in ll:
-                nums = re.findall(r'\d{1,3}(?:[.,]\d{3})*[.,]\d{2}', linea)
-                if nums:
-                    total = nums[-1]
-                    break
+            nums = re.findall(r'\d{1,3}(?:[.,]\d{3})*[.,]\d{2}', linea)
+            if nums:
+                todos_los_precios.extend(nums)
+        if todos_los_precios:
+            total = todos_los_precios[-1]
 
     return {"proveedor": proveedor, "cif_proveedor": cif, "fecha_emision": fecha, "total_factura": total}
 
