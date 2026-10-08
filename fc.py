@@ -9,10 +9,10 @@ st.set_page_config(page_title="Lector Profesional de Facturas", page_icon="📄"
 
 # --- SISTEMA DE CRÉDITOS ANÓNIMOS POR NAVEGADOR ---
 if "creditos_anonimos" not in st.session_state:
-    st.session_state.creditos_anonimos = 15  # 15 facturas gratis automáticas
+    st.session_state.creditos_anonimos = 15
 
 st.title("📄 Lector Automático de Facturas y Albaranes")
-st.markdown("Sube tus archivos PDF digitales para extraer **Proveedor, CIF, Fecha y Total** de forma instantánea.")
+st.markdown("Sube tus archivos PDF digitales para extraer **Proveedor, CIF, Fecha y Total**.")
 
 # Barra lateral informativa
 with st.sidebar:
@@ -24,7 +24,6 @@ with st.sidebar:
         st.markdown("---")
         st.subheader("🔓 Versión Ilimitada")
         st.markdown("Desbloquea procesamiento ilimitado para tu negocio.")
-        # Enlace de Stripe Pro
         st.link_button("💳 Suscribirse a Pro (15€/mes)", "https://buy.stripe.com/tu-enlace-de-pago")
     else:
         st.info("💡 No necesitas registrarte. Disfruta de tus facturas de prueba gratuitas.")
@@ -43,52 +42,63 @@ def extraer_texto_pdf_digital(archivo_pdf) -> str:
 def analizar_factura_texto(texto: str):
     lineas = [l.strip() for l in texto.split('\n') if l.strip()]
     
+    # --- 1. DETECCIÓN DE PROVEEDOR ---
     proveedor = "No encontrado"
     for linea in lineas[:10]:
         if (len(linea) > 3 and 
             not re.search(r'\d{2}:\d{2}', linea) and 
             not re.search(r'\d{4}-\d{2}-\d{2}', linea) and
-            not any(w in linea.lower() for w in ['factura', 'ticket', 'fecha', 'cif', 'nif', 'entrada', 'salida', 'albarán', 'trp'])):
+            not any(w in linea.lower() for w in ['factura', 'ticket', 'fecha', 'cif', 'nif', 'entrada', 'salida', 'albarán', 'página'])):
             proveedor = linea
             break
             
-    if proveedor == "No encontrado":
-        for linea in lineas[:5]:
-            if len(linea) > 3:
-                proveedor = linea
-                break
+    if proveedor == "No encontrado" and lineas:
+        proveedor = lineas[0]
 
+    # --- 2. DETECCIÓN DE CIF / NIF ---
     cif = "No encontrado"
-    cif_match = re.search(r'(?:cif|nif|id|sociedad|empresa)[\s.:]*([ABCDEFGHJKLMNPQRSUVW][0-9]{7}[0-9A-J]|[0-9]{8}[TRWAGMYFPDXBNJZSQVHLCKE])', texto, re.IGNORECASE)
+    cif_match = re.search(r'(?:cif|nif|id|sociedad|empresa|rut)[\s.:]*([ABCDEFGHJKLMNPQRSUVW][0-9]{7}[0-9A-J]|[0-9]{8}[TRWAGMYFPDXBNJZSQVHLCKE])', texto, re.IGNORECASE)
     if cif_match:
         cif = cif_match.group(1)
     else:
         cif_gen = re.search(r'\b([ABCDEFGHJKLMNPQRSUVW][0-9]{7}[0-9A-J]|[0-9]{8}[TRWAGMYFPDXBNJZSQVHLCKE])\b', texto, re.IGNORECASE)
-        if cif_gen: cif = cif_gen.group(0)
+        if cif_gen: 
+            cif = cif_gen.group(0)
 
+    # --- 3. DETECCIÓN DE FECHA (Más flexible) ---
     fecha = "No encontrada"
-    fecha_iso = re.search(r'\b(20\d{2})[-/.](0[1-9]|1[012])[-/.](0[1-9]|[12][0-9]|3[01])\b', texto)
-    if fecha_iso:
-        fecha = fecha_iso.group(0)
-    else:
-        fecha_eur = re.search(r'\b(0[1-9]|[12][0-9]|3[01])[-/.](0[1-9]|1[012])[-/.](20\d{2})\b', texto)
-        if fecha_eur: fecha = fecha_eur.group(0)
+    # Buscar patrones numéricos comunes (YYYY-MM-DD, DD/MM/YYYY, DD-MM-YYYY)
+    patrones_fecha = [
+        r'\b(20\d{2})[-/.](0[1-9]|1[012])[-/.](0[1-9]|[12][0-9]|3[01])\b',
+        r'\b(0[1-9]|[12][0-9]|3[01])[-/.](0[1-9]|1[012])[-/.](20\d{2})\b',
+        r'\b(0[1-9]|[12][0-9]|3[01])\s+(?:enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)\s+(?:de\s+)?20\d{2}\b'
+    ]
+    
+    for patron in patrones_fecha:
+        match = re.search(patron, texto, re.IGNORECASE)
+        if match:
+            fecha = match.group(0)
+            break
 
+    # --- 4. DETECCIÓN DE TOTAL (Búsqueda avanzada de importes monetarios) ---
     total = "No encontrado"
+    
+    # Buscar líneas que contengan palabras clave de total
     for linea in reversed(lineas):
         ll = linea.lower()
-        if any(p in ll for p in ['total', 'a pagar', 'importe total', 'total factura']):
-            if 'subtotal' not in ll and 'base' not in ll:
-                nums = re.findall(r'\d+[.,]\d{2}', linea)
+        if any(p in ll for p in ['total', 'a pagar', 'importe total', 'total factura', 'importe a pagar', 'import total']):
+            if 'subtotal' not in ll and 'base' not in ll and 'iva' not in ll:
+                nums = re.findall(r'\d{1,3}(?:[.,]\d{3})*[.,]\d{2}', linea)
                 if nums:
                     total = nums[-1]
                     break
-
+                    
+    # Si no lo encuentra por palabra clave estricta, busca los números más grandes o al final del documento
     if total == "No encontrado":
         for linea in lineas:
             ll = linea.lower()
             if ('total' in ll or 'pagar' in ll) and 'subtotal' not in ll:
-                nums = re.findall(r'\d+[.,]\d{2}', linea)
+                nums = re.findall(r'\d{1,3}(?:[.,]\d{3})*[.,]\d{2}', linea)
                 if nums:
                     total = nums[-1]
                     break
@@ -104,7 +114,7 @@ uploaded_files = st.file_uploader(
 
 if uploaded_files:
     if st.session_state.creditos_anonimos <= 0:
-        st.error("⚠️ Has agotado tus 15 pruebas gratuitas. Por favor, adquiere la versión ilimitada en la barra lateral para continuar descargando resultados.")
+        st.error("⚠️ Has agotado tus 15 pruebas gratuitas. Adquiere la versión ilimitada en la barra lateral.")
     else:
         num_archivos = len(uploaded_files)
         
