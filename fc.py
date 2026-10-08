@@ -24,7 +24,7 @@ with st.sidebar:
         st.markdown("---")
         st.subheader("🔓 Versión Ilimitada")
         st.markdown("Desbloquea procesamiento ilimitado para tu negocio.")
-        st.link_button("💳 Suscribirse à Pro (15€/mes)", "https://buy.stripe.com/tu-enlace-de-pago")
+        st.link_button("💳 Suscribirse a Pro (15€/mes)", "https://buy.stripe.com/tu-enlace-de-pago")
     else:
         st.info("💡 No necesitas registrarte. Disfruta de tus facturas de prueba gratuitas.")
 
@@ -79,36 +79,31 @@ def analizar_factura_texto(texto: str):
             fecha = match.group(0)
             break
 
-    # --- 4. DETECCIÓN DE TOTAL (Estrategia Multicriterio Reforzada) ---
+    # --- 4. DETECCIÓN DE TOTAL (Motor Ultra-Flexible) ---
     total = "No encontrado"
     
-    # Intento A: Buscar líneas que contengan palabras clave amplias
-    for linea in reversed(lineas):
+    # Paso A: Buscar líneas que contengan palabras clave de pago o total
+    candidatos = []
+    for linea in lineas:
         ll = linea.lower()
-        if any(p in ll for p in ['total', 'a pagar', 'importe', 'suma', 'eur', '€']):
-            if 'subtotal' not in ll and 'base' not in ll and 'iva' not in ll:
+        if any(p in ll for p in ['total', 'a pagar', 'importe', 'suma', 'eur', '€', 'bruto', 'neto']):
+            if 'subtotal' not in ll and 'base imponible' not in ll:
+                # Extraer cualquier combinación numérica con decimales en esa línea
                 nums = re.findall(r'\d{1,3}(?:[.,]\d{3})*[.,]\d{2}', linea)
-                if nums:
-                    total = nums[-1]
-                    break
+                for n in nums:
+                    candidatos.append(n)
                     
-    # Intento B: Si sigue sin encontrarse, buscar cualquier importe monetario válido en las últimas 10 líneas del documento (donde suele ir el total)
-    if total == "No encontrado":
-        for linea in reversed(lineas[-15:]):
-            nums = re.findall(r'\d{1,3}(?:[.,]\d{3})*[.,]\d{2}', linea)
-            if nums:
-                total = nums[-1]
-                break
+    if candidatos:
+        # El último candidato suele ser el total general de la factura
+        total = candidatos[-1]
 
-    # Intento C: Último recurso, buscar todos los importes del documento y coger el último de abajo
+    # Paso B: Si no se encontró por palabras clave, buscar todos los importes monetarios del documento (filtrando años)
     if total == "No encontrado":
-        todos_los_precios = []
-        for linea in lineas:
-            nums = re.findall(r'\d{1,3}(?:[.,]\d{3})*[.,]\d{2}', linea)
-            if nums:
-                todos_los_precios.extend(nums)
-        if todos_los_precios:
-            total = todos_los_precios[-1]
+        todos_importes = re.findall(r'\b\d{1,3}(?:[.,]\d{3})*[.,]\d{2}\b', texto)
+        # Filtrar valores que parezcan años o fechas
+        importes_validos = [imp for imp in todos_importes if not imp.startswith('20') and not imp.startswith('19')]
+        if importes_validos:
+            total = importes_validos[-1] # Cogemos el último importe relevante del documento
 
     return {"proveedor": proveedor, "cif_proveedor": cif, "fecha_emision": fecha, "total_factura": total}
 
